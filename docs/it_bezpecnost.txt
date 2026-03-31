@@ -1,0 +1,54 @@
+IT BEZPEČNOST - ŠKOLNÍ SÍŤ
+==========================
+
+PRAVIDLA PRO UŽIVATELE ŠKOLNÍ SÍTĚ:
+
+1. HESLA:
+---------
+- Minimálně 8 znaků
+- Zahrnout: písmena, čísla, symboly
+- Měnit každých 6 měsíců
+- Nesdílej heslo
+- Nepsevej si heslo do poznámek
+- Zapomenuté heslo: Hlášení na IT sekci
+
+2. PŘÍSTUP K DATŮM:
+---------
+- Přístup jen na své soubory
+- Nečti si cizí dokumenty
+- Nemaž data bez povolení
+- Zálohování: Automatické weekly
+- Ztráta dat: Hlášení do 24 hodin
+
+3. EMAIL:
+---------
+- Používej školní email (jméno@kurim.cz)
+- Kontrolu 1x denně min.
+- Neodesílej důvěrné údaje
+- SPAM: Oznámit administrátorovi
+- Kapacita: 500 MB limit
+
+4. INTERNET:
+---------
+- Filtrování obsahu: Povoleno
+- Zákaz: Torrent, P2P, VPN
+- Zákaz: Pornografie, rasismus, násilí
+- Zákaz: Hackerské nástroje
+- Log: Sledování aktivit
+- Porušení: Oznámení rodičům + disciplína
+
+5. ZAŘÍZENÍ:
+---------
+- Počítače: Není opt. instalovat SW
+- USB: Řízená instalace
+- Tiskárny: Limitován počet stránek
+- Fyzická bezpečnost: Zabezpečit stroj odchodem
+- Hlášení problémů: IT help desk ext. 250
+
+6. BEZPEČNOSTNÍ INCIDENTY:
+---------
+- Možné úniky hesli: Okamžité hlášení
+- Podezření na ransomware: Vypnout stroj
+- Podezření na krádež: Nahlásit IT + bezpečnost
+
+KONTAKT IT ODDĚLENÍ: IT@KURIM.CZ
