@@ -307,7 +307,7 @@
                     <textarea id="aiPrompt" placeholder="Postav otázku AI..."></textarea>
 
                     <div style="display: flex; gap: 8px; margin-top: 10px;">
-                        <button onclick="sendAIPrompt()" style="flex: 1;">Poslat</button>
+                        <button onclick="sendAIPrompt(this)" style="flex: 1;">Poslat</button>
                         <button onclick="clearAIMessages()" style="flex: 0.3; background: #999;">Smazat</button>
                     </div>
 
@@ -437,18 +437,20 @@
         }
 
         // Send AI prompt
-        async function sendAIPrompt() {
+        async function sendAIPrompt(btn) {
             const prompt = document.getElementById('aiPrompt').value.trim();
             const docName = document.getElementById('documentSelect').value;
+            const button = btn || document.querySelector('button[onclick^="sendAIPrompt"]');
 
             if (!prompt) {
                 showError('ai', 'Napiš otázku pro AI');
                 return;
             }
 
-            const btn = event.target;
-            btn.disabled = true;
-            btn.innerHTML = '<span class="loading"></span> Čekám...';
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '<span class="loading"></span> Čekám...';
+            }
 
             try {
                 const response = await fetch('/ai', {
@@ -481,8 +483,10 @@
             } catch (error) {
                 showError('ai', 'Chyba: ' + error.message);
             } finally {
-                btn.disabled = false;
-                btn.innerHTML = 'Poslat';
+                if (button) {
+                    button.disabled = false;
+                    button.innerHTML = 'Poslat';
+                }
             }
         }
 

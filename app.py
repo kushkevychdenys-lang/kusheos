@@ -2,26 +2,181 @@
 Interní portál pro školu/kancelář
 - Veřejný chat
 - AI asistenta s dokumenty
+- Vektorové vyhledávání přes ChromaDB (RAG)
 """
 
 import os
+import time
 import requests
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify
+import chromadb
 
 app = Flask(__name__)
 
 # ===== CONFIG =====
 PORT = int(os.environ.get("PORT", 8081))
-OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://kurim.ithope.eu")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://kurim.ithope.eu/v1")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gemma3:27b")
+CHROMA_HOST = os.environ.get("CHROMA_HOST", "vectordb")
+CHROMA_PORT = int(os.environ.get("CHROMA_PORT", 8000))
 
 # ===== STATE =====
 chat_messages = []  # In-memory chat storage
 DOCS_FOLDER = "docs"
+chroma_client = None
+chroma_collection = None
+
+
+# ===== CHROMA DB INITIALIZATION =====
+def init_chroma():
+    """Inicializuj ChromaDB klienta s retry logikou"""
+    global chroma_client, chroma_collection
+    
+    for i in range(10):
+        try:
+            print(f"[{i+1}/10] Pokus o připojení k ChromaDB na {CHROMA_HOST}:{CHROMA_PORT}...")
+            chroma_client = chromadb.HttpClient(
+                host=CHROMA_HOST,
+                port=CHROMA_PORT
+            )
+            # Test připojení
+            chroma_client.heartbeat()
+            print("✓ ChromaDB připojen")
+            break
+        except Exception as e:
+            print(f"✗ Chyba připojení k ChromaDB: {e}")
+            if i < 9:
+                time.sleep(2)
+            else:
+                print("✗ ChromaDB není dostupný - pokračuji bez RAG")
+                chroma_client = None
+                return
+    
+    # Vytvoř kolekci
+    if chroma_client:
+        try:
+            chroma_collection = chroma_client.get_or_create_collection(
+                name="dokumenty",
+                metadata={"hnsw:space": "cosine"}
+            )
+            print("✓ ChromaDB kolekce vytvořena")
+            # Načti dokumenty do ChromaDB
+            load_documents_to_chroma()
+        except Exception as e:
+            print(f"✗ Chyba vytvoření kolekce: {e}")
+
+
+def chunk_document(text, chunk_size=1000, overlap=200):
+    """Rozděluj text na chunks s překrytím pro lepší RAG"""
+    chunks = []
+    for i in range(0, len(text), chunk_size - overlap):
+        chunk = text[i : i + chunk_size]
+        if chunk.strip():  # Ignoruj prázdné chunks
+            chunks.append(chunk)
+    return chunks if chunks else [text]
+
+
+def load_documents_to_chroma():
+    """Načti všechny .txt dokumenty do ChromaDB s chunkingem"""
+    global chroma_collection
+    
+    if not chroma_collection or not os.path.exists(DOCS_FOLDER):
+        return
+    
+    try:
+        files = [f for f in os.listdir(DOCS_FOLDER) if f.endswith('.txt')]
+        if not files:
+            print("ℹ Žádné .txt dokumenty k indexování")
+            return
+        
+        chunk_counter = 0
+        for filename in files:
+            try:
+                filepath = os.path.join(DOCS_FOLDER, filename)
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                
+                # Rozděluj dokument na chunks
+                chunks = chunk_document(content, chunk_size=1000, overlap=200)
+                base_id = filename.replace('.txt', '')
+                
+                # Přidej chunky do ChromaDB
+                for chunk_idx, chunk in enumerate(chunks):
+                    chunk_id = f"{base_id}_chunk_{chunk_idx}"
+                    chroma_collection.upsert(
+                        documents=[chunk],
+                        metadatas=[{
+                            "filename": filename,
+                            "chunk_index": chunk_idx,
+                            "total_chunks": len(chunks)
+                        }],
+                        ids=[chunk_id]
+                    )
+                    chunk_counter += 1
+                
+                print(f"✓ Dokument '{filename}' rozděleno na {len(chunks)} chunků a indexováno v ChromaDB")
+            except Exception as e:
+                print(f"✗ Chyba indexování '{filename}': {e}")
+        
+        print(f"✓ Celkem indexováno {chunk_counter} chunků")
+    
+    except Exception as e:
+        print(f"✗ Chyba při načítání dokumentů: {e}")
 
 # ===== HELPERS =====
+
+def search_in_chroma(query, document_name=None, n_results=3):
+    """Vyhledej nejrelevantnější chunks v ChromaDB pro RAG"""
+    global chroma_collection
+    
+    if not chroma_collection:
+        return None, []
+    
+    try:
+        query_args = {
+            "query_texts": [query],
+            "n_results": n_results
+        }
+
+        if document_name:
+            query_args["where"] = {"filename": document_name}
+
+        try:
+            results = chroma_collection.query(**query_args)
+        except Exception:
+            # Fallback: pokud metadata filtr není podporovaný, načti obecný dotaz a 
+            # ručně filtruj podle názvu dokumentu.
+            results = chroma_collection.query(
+                query_texts=[query],
+                n_results=n_results
+            )
+
+        if results and results.get('documents') and results['documents'][0]:
+            chunks = results['documents'][0]
+            metadata = results['metadatas'][0] if results.get('metadatas') else []
+
+            if document_name and metadata:
+                filtered = [
+                    (chunk, meta)
+                    for chunk, meta in zip(chunks, metadata)
+                    if isinstance(meta, dict) and meta.get('filename') == document_name
+                ]
+                if not filtered:
+                    return None, []
+                chunks, metadata = zip(*filtered)
+                chunks = list(chunks)
+                metadata = list(metadata)
+
+            context = "\n---\n".join(chunks)
+            return context, metadata
+        
+        return None, []
+    except Exception as e:
+        print(f"Chyba vyhledávání v ChromaDB: {e}")
+        return None, []
+
 def get_documents():
     """Vrť seznam .txt souborů z docs/ složky"""
     try:
@@ -43,7 +198,7 @@ def read_document(filename):
         filepath = os.path.abspath(os.path.join(DOCS_FOLDER, filename))
 
         # zabrání čtení mimo docs/
-        if not filepath.startswith(base):
+        if os.path.commonpath([base, filepath]) != base:
             return None
 
         if os.path.exists(filepath):
@@ -57,26 +212,44 @@ def read_document(filename):
         return None
 
 
-def call_openai_api(prompt, document_content=None):
-    """Zavolej OpenAI-compatible API s textem dokumentu (pokud je)"""
+def call_openai_api(prompt, document_name=None, document_content=None, use_chroma=True):
+    """Zavolej OpenAI-compatible API s RAG pipeline (ChromaDB)"""
     try:
         if not OPENAI_API_KEY or not OPENAI_BASE_URL:
             return "❌ Chyba: AI není nakonfigurován (chybí OPENAI_API_KEY nebo OPENAI_BASE_URL)"
 
-        # Příprava systémového promptu
+        # Systémový prompt pro AI
         system_prompt = (
             "Jsi AI správce lokální sítě pro školu nebo kancelář. "
             "Odpovídej stručně, jasně a česky. "
-            "Pokud je přiložen dokument, pracuj hlavně s jeho obsahem."
+            "Pokud je poskytnut kontext z dokumentů, pracuj hlavně s jeho obsahem."
         )
 
-        # Příprava obsahu - pokud je dokument, zahrň ho do kontextu
-        if document_content:
-            user_message = f"DOKUMENT:\n{document_content}\n\nOTÁZKA:\n{prompt}"
+        # RAG Pipeline: Hledej relevantní chunks
+        context_text = ""
+        metadata_info = {}
+        
+        if use_chroma:
+            context_text, metadata_list = search_in_chroma(prompt, document_name=document_name)
+            if context_text:
+                print(f"ℹ RAG: Nalezeno {len(metadata_list)} relevantních chunků")
+                if metadata_list and isinstance(metadata_list, list):
+                    sources = set(m.get('filename', 'unknown') if isinstance(m, dict) else 'unknown' 
+                                 for m in metadata_list)
+                    metadata_info['sources'] = list(sources)
+        
+        # Fallback: Pokud se nic nenašlo v RAG a je vybraný konkrétní dokument
+        if not context_text and document_content:
+            context_text = document_content
+            metadata_info['fallback'] = 'specific_document'
+        
+        # Sestavení finální zprávy s kontextem
+        if context_text:
+            user_message = f"KONTEXT Z DOKUMENTŮ:\n{context_text}\n\nOTÁZKA:\n{prompt}"
         else:
             user_message = prompt
 
-        # Volání API
+        # Volání OpenAI-compatible API
         headers = {
             "Authorization": f"Bearer {OPENAI_API_KEY}",
             "Content-Type": "application/json"
@@ -93,10 +266,11 @@ def call_openai_api(prompt, document_content=None):
         }
 
         response = requests.post(
-            f"{OPENAI_BASE_URL}/v1/chat/completions",
+            f"{OPENAI_BASE_URL}/chat/completions",
             json=payload,
             headers=headers,
-            timeout=30
+            timeout=30,
+            verify=False
         )
 
         if response.status_code == 200:
@@ -127,16 +301,46 @@ def ping():
     return "pong"
 
 
+def get_chroma_stats():
+    """Vrť statistiky ChromaDB"""
+    global chroma_collection
+    
+    files_count = len(get_documents())
+    if not chroma_collection:
+        return {
+            "status": "disconnected",
+            "documents": files_count,
+            "indexed_chunks": 0
+        }
+    
+    try:
+        chunk_count = chroma_collection.count()
+        return {
+            "status": "connected",
+            "documents": files_count,
+            "indexed_chunks": chunk_count
+        }
+    except Exception:
+        return {
+            "status": "error",
+            "documents": files_count,
+            "indexed_chunks": 0
+        }
+
+
 @app.route('/status', methods=['GET'])
 def status():
-    """Vrť informace o serveru"""
+    """Vrť informace o serveru a RAG"""
+    chroma_stats = get_chroma_stats()
     return jsonify({
         "status": "ok",
-        "application": "Školní interní portál",
+        "application": "RAG - Školní interní portál",
         "version": "1.0",
-        "author": "AI správce",
-        "time": datetime.now().isoformat(),
-        "port": PORT
+        "port": PORT,
+        "model": OPENAI_MODEL,
+        "ai_api": OPENAI_BASE_URL,
+        "chroma": chroma_stats,
+        "time": datetime.now().isoformat()
     })
 
 
@@ -234,7 +438,11 @@ def ai_endpoint():
                 return jsonify({"error": f"Dokument '{document_name}' nenalezen"}), 404
 
         # Zavolej AI
-        response = call_openai_api(prompt, document_content)
+        response = call_openai_api(
+            prompt,
+            document_name=document_name,
+            document_content=document_content
+        )
 
         return jsonify({
             "status": "ok",
@@ -248,8 +456,17 @@ def ai_endpoint():
 
 # ===== RUN =====
 if __name__ == '__main__':
-    print(f"🚀 Spouštění na 0.0.0.0:{PORT}")
-    print(f"📚 OPENAI_BASE_URL: {OPENAI_BASE_URL}")
-    print(f"📊 OPENAI_MODEL: {OPENAI_MODEL}")
+    print(f"\n{'='*60}")
+    print(f"🚀 RAG Aplikace - Školní Interní Portál")
+    print(f"{'='*60}")
+    print(f"📌 Port: 0.0.0.0:{PORT}")
+    print(f"🤖 AI Model: {OPENAI_MODEL}")
+    print(f"🌐 API URL: {OPENAI_BASE_URL}")
+    print(f"🗃️  ChromaDB: {CHROMA_HOST}:{CHROMA_PORT}")
+    print(f"{'='*60}\n")
     
+    # Inicializuj ChromaDB s dokumenty
+    init_chroma()
+    
+    # Spusť Flask aplikaci
     app.run(host='0.0.0.0', port=PORT, debug=False)

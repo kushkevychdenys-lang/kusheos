@@ -26,7 +26,6 @@ wheels/
 # Flask
 instance/
 .webassets-cache
-
 # Testing
 .pytest_cache/
 .coverage
@@ -37,7 +36,6 @@ instance/
 *.swp
 *.swo
 *~
-
 # OS
 .DS_Store
 Thumbs.db
@@ -45,6 +43,6 @@ Thumbs.db
 # Environment
 .env
 .env.local
-
 # Docker
 .dockerignore
+docker-compose.yml

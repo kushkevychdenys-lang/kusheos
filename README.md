@@ -2,250 +2,106 @@
 Jednoduchá webová aplikace ve Flasku pro vnitřní komunikaci škol/kanceláří s veřejným chatem a AI asistentem.
 
 ## 🚀 Vlastnosti
-- **Veřejný chat** - komunikace mezi uživateli (bez registrace)
-- **AI asistent** - příspěvkový AI s podporou textových dokumentů
-- **Správa dokumentů** - čtení .txt souborů z `docs/` složky
-- **Lehká aplikace** - minimální RAM footprint (~150-200 MB)
-- **Docker ready** - jeden kontejner s gunicorn
-- **OpenAI-compatible API** - integrace s libovolným AI backendem (Ollama, LM Studio, Hugging Face, atd.)
-- **Automatická aktualizace chatu** - real-time polling každé 2 sekundy
-- **Responsive design** - funguje na počítači i mobilu
+- Veřejný chat - komunikace mezi uživateli (bez registrace)
+- AI asistent - odpovědi s využitím dokumentů
+- RAG (ChromaDB) - vektorové vyhledávání v dokumentech
+  - dělení dokumentů na části (chunky)
+  - vyhledání relevantních částí podle dotazu
+  - použití kontextu při odpovědi AI
+- Správa dokumentů - čtení `.txt` souborů z `docs/`
+- Docker Compose - aplikace běží ve 2 kontejnerech
+- OpenAI-compatible API - napojení na externí AI
+- Responsive UI
 
 ## 📦 Struktura Projektu
-```
 kusheos/
-├── app.py                 # Flask aplikace (backend)
-├── requirements.txt       # Python závislosti
-├── Dockerfile            # Docker build s gunicorn
-├── docker-compose.yml    # Vývojové prostředí s Ollama (volitelné)
-├── README.md             # Tato dokumentace
+├── app.py
+├── compose.yml
+├── requirements.txt
+├── Dockerfile
+├── README.md
+├── .env.example
 ├── templates/
-│   └── index.html        # HTML frontend (chat + AI)
+│   └── index.html
 └── docs/
-    ├── README.md         # Návod na správu dokumentů
-    ├── skolni_rad.txt    # Příklad školního řádu
-    └── it_bezpecnost.txt  # Příklad IT bezpečnostních pravidel
-```
+    ├── skolni_rad.txt
+    └── it_bezpecnost.txt
 
-## 🔧 Setup & Instalace
+## 🔧 Setup & Spuštění
+Docker Compose:
 
-### Lokální vývoj (bez Dockeru)
+docker compose up --build
 
-```bash
-# Python 3.11+
-pip install -r requirements.txt
+Aplikace poběží na:
+http://localhost:8081
 
-# Spuštění
-export OPENAI_API_KEY="sk-..."
-export OPENAI_BASE_URL="https://kurim.ithope.eu"
-python app.py
-```
+## 🏗️ Architektura
+Aplikace běží na 2 kontejnerech:
 
-Aplikace běží na: **http://localhost:8081**
+- app → Flask aplikace
+- vectordb → ChromaDB
 
-### Docker Deploy (produkce)
-
-```bash
-# Build image
-docker build -t kushaeos:latest .
-
-# Run kontejner
-docker run -d \
-  --name kushaeos \
-  -p 8081:8081 \
-  -e OPENAI_API_KEY="sk-..." \
-  -e OPENAI_BASE_URL="https://kurim.ithope.eu" \
-  -e OPENAI_MODEL="gemma3:27b" \
-  kushaeos:latest
-```
-
-### Vývoj s docker-compose (s lokálním AI)
-
-```bash
-# Spuštění s Ollama (volitelné)
-docker-compose up
-
-# Nebo na pozadí
-docker-compose up -d
-
-# Zastavení
-docker-compose down
-
-# Logy
-docker-compose logs -f app
-```
+Komunikace:
+- app → vectordb (port 8000)
+- app → externí AI API
 
 ## 🌍 Environment Variables
-
-| Proměnná | Default | Popis |
-|----------|---------|-------|
-| `PORT` | `8081` | Port aplikace (host: 0.0.0.0) |
-| `OPENAI_BASE_URL` | `https://kurim.ithope.eu` | URL AI serveru (OpenAI-compatible) |
-| `OPENAI_API_KEY` | - | API klíč |
-| `OPENAI_MODEL` | `gemma3:27b` | Model na serveru |
+- PORT
+- OPENAI_BASE_URL
+- OPENAI_API_KEY
+- OPENAI_MODEL
+- CHROMA_HOST
+- CHROMA_PORT
 
 ## 📡 API Endpoints
+Chat:
+- GET /chat
+- POST /chat/send
 
-### Chat
-| Metoda | Endpoint | Popis |
-|--------|----------|-------|
-| `GET` | `/chat` | Vrátí všechny zprávy (max 500) |
-| `POST` | `/chat/send` | Pošli novou zprávu |
+Dokumenty:
+- GET /docs
+- GET /docs/get?name=...
 
-```json
-POST /chat/send
-{
-  "user": "Jméno",
-  "message": "Text zprávy"
-}
-```
+AI:
+- POST /ai
 
-### Dokumenty
-| Metoda | Endpoint | Popis |
-|--------|----------|-------|
-| `GET` | `/docs` | Seznam všech .txt souborů v `docs/` |
-| `GET` | `/docs/get?name=skolni_rad.txt` | Obsah konkrétního dokumentu |
+Health:
+- GET /ping
+- GET /status
 
-### AI
-| Metoda | Endpoint | Popis |
-|--------|----------|-------|
-| `POST` | `/ai` | Pošli otázku AI (volitelně s dokumentem) |
+## 🤖 RAG princip
+1. načtení `.txt` souborů
+2. rozdělení na části
+3. uložení do ChromaDB
+4. vyhledání relevantních částí
+5. poslání kontextu do AI
+6. odpověď
 
-```json
-POST /ai
-{
-  "prompt": "Jaké jsou požadavky na hesla?",
-  "document": "it_bezpecnost.txt"  // volitelné
-}
-```
-
-### Health & Status
-| Metoda | Endpoint | Popis |
-|--------|----------|-------|
-| `GET` | `/ping` | Health check (vrátí "pong") |
-| `GET` | `/status` | Server status s metadaty |
-
-## 🤖 AI Integrace
-
-Aplikace používá OpenAI-compatible API pro připojení k různým AI backendům:
-
-### Systémový prompt:
-```
-Jsi AI správce lokální sítě pro školu nebo kancelář.
-Odpovídaj stručně, jasně a česky.
-Pokud je přiložen dokument, pracuj hlavně s jeho obsahem.
-```
-
-### Příklady použití:
-1. **Bez dokumentu:** "Kolik je 2+2?"
-2. **S dokumentem:** Vyber `it_bezpecnost.txt` → "Jaké jsou požadavky na hesla?"
-3. AI zpracuje obsah dokumentu + otázku → vrátí odpověď z kontextu
-
-### Kompatibilní AI servery:
-- **Ollama** (lokální): `http://localhost:11434`
-- **LM Studio**: `http://localhost:8000`
-- **Hugging Face**: `https://api-inference.huggingface.co`
-- **Kurim IT Hope**: `https://kurim.ithope.eu`
-
-## 💾 Data Storage
-
-- **Chat zprávy**: Uloženy v paměti Pythonu (max 500 zpráv)
-- **AI historie**: Uložena v localStorage prohlížeče
-- **Dokumenty**: Čtení z `docs/` složky (read-only)
-- **Žádná databáze** - vše v paměti nebo souborech
-
-⚠️ **Poznámka**: Data se smažou po restartu aplikace!
+## 💾 Data
+- chat je uložen jen v paměti
+- po restartu se smaže
+- dokumenty jsou ve složce docs/
+- ChromaDB slouží jen pro běh aplikace
 
 ## 🛡️ Bezpečnost
-
-- **Žádná registrace/autentifikace** - veřejný přístup
-- **Žádná databáze** → bez SQL injection
-- **Žádné souborové uploady** → bez malware rizika
-- **Kontrola vstupů**: Max. délky (uživatel: 50, zpráva: 500 znaků)
-- **Path traversal prevence**: Bezpečné čtení souborů
-- **HTTPS doporučeno** pro produkci
-- **Firewall**: Otevřen jen port 8081
-
-## 🎯 Omezení (záměrná jednoduchost)
-
-- ❌ Žádná registrace/přihlášení
-- ❌ Žádné ukládání na disk
-- ❌ Žádná databáze
-- ❌ Žádné websocketů (pouze polling)
-- ❌ Žádné složité knihoven
-- ❌ Žádné mikroslužeb
-
-Vše je záměrně **jednoduché** pro hosty s omezenými zdroji!
-
-## 📊 Výkon
-
-- **RAM**: ~150-200 MB (Python + Flask + Gunicorn)
-- **CPU**: Minimální (čeká na API volání)
-- **Disk**: ~50 MB (bez AI modelů)
-- **Doba startu**: <5 sekund
-- **Concurrent users**: Omezeno pamětí (každý uživatel ~1-2 MB)
+- žádná autentifikace
+- omezení délky vstupů
+- bezpečné čtení souborů
 
 ## 🐛 Troubleshooting
+AI nefunguje:
+- zkontroluj OPENAI_API_KEY
+- zkontroluj OPENAI_BASE_URL
 
-### Chyba: "Nelze se připojit k AI serveru"
-- Zkontroluj `OPENAI_BASE_URL` (má být dostupný z kontejneru)
-- Zkontroluj `OPENAI_API_KEY`
-- Zkontroluj firewall/port forwarding
-- Test: `curl -X POST $OPENAI_BASE_URL/v1/chat/completions -H "Authorization: Bearer $OPENAI_API_KEY" -d '{"model":"test","messages":[{"role":"user","content":"test"}]}'`
+Dokument nenalezen:
+- musí být v docs/
+- musí končit .txt
 
-### Chyba: "Dokument nenalezen"
-- Zkontroluj název souboru (case-sensitive, musí končit `.txt`)
-- Zkontroluj že soubor je v `docs/` složce
-- Zkontroluj práva čtení
-- Test: `curl http://localhost:8081/docs`
+Aplikace neběží:
+docker compose logs
 
-### Chat se nezobrazuje
-- Zkontroluj konzoli prohlížeče (F12)
-- Zkontroluj že aplikace běží: `curl http://localhost:8081/ping`
-- Pokud >500 zpráv: Starší se automaticky mažou
-
-### Docker kontejner neodpovídá
-- Zkontroluj port mapping: `docker ps`
-- Zkontroluj logy: `docker logs kushaeos`
-- Zkontroluj že kontejner běží: `docker stats`
-
-## 📝 Přidávání Dokumentů
-
-Stačí přidat `.txt` soubor do `docs/` složky:
-
-```bash
-# Příklad
-cat > docs/nova_smernice.txt << EOF
-NOVÁ SMĚRNICE
-==============
-
-Toto je nový dokument pro AI.
-EOF
-```
-
-Aplikace ho automaticky najde při příštím načtení seznamu dokumentů.
-
-Podrobný návod: viz `docs/README.md`
-
-## 🤝 Contributing
-
-Projekt je určen pro školy a studenty - vítány příspěvky!
-
-### Jak přispět:
-1. Vyzkoušej lokálně (`python app.py`)
-2. Otestuj Docker (`docker build . && docker run ...`)
-3. Zkontroluj memory usage (< 300 MB)
-4. Pull request! 🚀
-
-### Doporučené vylepšení:
-- Přidat další dokumenty do `docs/`
-- Vylepšit UI/UX
-- Přidat další API endpointy
-- Optimalizovat výkon
+## 📝 Přidání dokumentů
+Stačí přidat .txt soubor do složky docs/.
 
 ## 📄 Licence
-
-Tento projekt je open-source pro vzdělávací účely.
-
-Vytvořeno pro Škola Kuřim
-Březen 2026
+Projekt pro vzdělávací účely.
