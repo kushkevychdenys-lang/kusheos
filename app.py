@@ -14,7 +14,6 @@ import chromadb
 
 app = Flask(__name__)
 
-# ===== CONFIG =====
 PORT = int(os.environ.get("PORT", 8081))
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://kurim.ithope.eu/v1")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
@@ -22,14 +21,12 @@ OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gemma3:27b")
 CHROMA_HOST = os.environ.get("CHROMA_HOST", "vectordb")
 CHROMA_PORT = int(os.environ.get("CHROMA_PORT", 8000))
 
-# ===== STATE =====
 chat_messages = []  # In-memory chat storage
 DOCS_FOLDER = "docs"
 chroma_client = None
 chroma_collection = None
 
 
-# ===== CHROMA DB INITIALIZATION =====
 def init_chroma():
     """Inicializuj ChromaDB klienta s retry logikou"""
     global chroma_client, chroma_collection
@@ -41,7 +38,6 @@ def init_chroma():
                 host=CHROMA_HOST,
                 port=CHROMA_PORT
             )
-            # Test připojení
             chroma_client.heartbeat()
             print("✓ ChromaDB připojen")
             break
@@ -54,7 +50,6 @@ def init_chroma():
                 chroma_client = None
                 return
     
-    # Vytvoř kolekci
     if chroma_client:
         try:
             chroma_collection = chroma_client.get_or_create_collection(
@@ -62,7 +57,6 @@ def init_chroma():
                 metadata={"hnsw:space": "cosine"}
             )
             print("✓ ChromaDB kolekce vytvořena")
-            # Načti dokumenty do ChromaDB
             load_documents_to_chroma()
         except Exception as e:
             print(f"✗ Chyba vytvoření kolekce: {e}")
@@ -73,7 +67,7 @@ def chunk_document(text, chunk_size=1000, overlap=200):
     chunks = []
     for i in range(0, len(text), chunk_size - overlap):
         chunk = text[i : i + chunk_size]
-        if chunk.strip():  # Ignoruj prázdné chunks
+        if chunk.strip():
             chunks.append(chunk)
     return chunks if chunks else [text]
 
@@ -98,11 +92,9 @@ def load_documents_to_chroma():
                 with open(filepath, 'r', encoding='utf-8') as f:
                     content = f.read()
                 
-                # Rozděluj dokument na chunks
                 chunks = chunk_document(content, chunk_size=1000, overlap=200)
                 base_id = filename.replace('.txt', '')
                 
-                # Přidej chunky do ChromaDB
                 for chunk_idx, chunk in enumerate(chunks):
                     chunk_id = f"{base_id}_chunk_{chunk_idx}"
                     chroma_collection.upsert(
@@ -125,8 +117,6 @@ def load_documents_to_chroma():
     except Exception as e:
         print(f"✗ Chyba při načítání dokumentů: {e}")
 
-# ===== HELPERS =====
-
 def search_in_chroma(query, document_name=None, n_results=3):
     """Vyhledej nejrelevantnější chunks v ChromaDB pro RAG"""
     global chroma_collection
@@ -146,8 +136,6 @@ def search_in_chroma(query, document_name=None, n_results=3):
         try:
             results = chroma_collection.query(**query_args)
         except Exception:
-            # Fallback: pokud metadata filtr není podporovaný, načti obecný dotaz a 
-            # ručně filtruj podle názvu dokumentu.
             results = chroma_collection.query(
                 query_texts=[query],
                 n_results=n_results
@@ -197,7 +185,6 @@ def read_document(filename):
         base = os.path.abspath(DOCS_FOLDER)
         filepath = os.path.abspath(os.path.join(DOCS_FOLDER, filename))
 
-        # zabrání čtení mimo docs/
         if os.path.commonpath([base, filepath]) != base:
             return None
 
@@ -218,14 +205,12 @@ def call_openai_api(prompt, document_name=None, document_content=None, use_chrom
         if not OPENAI_API_KEY or not OPENAI_BASE_URL:
             return "❌ Chyba: AI není nakonfigurován (chybí OPENAI_API_KEY nebo OPENAI_BASE_URL)"
 
-        # Systémový prompt pro AI
         system_prompt = (
             "Jsi AI správce lokální sítě pro školu nebo kancelář. "
             "Odpovídej stručně, jasně a česky. "
             "Pokud je poskytnut kontext z dokumentů, pracuj hlavně s jeho obsahem."
         )
 
-        # RAG Pipeline: Hledej relevantní chunks
         context_text = ""
         metadata_info = {}
         
@@ -238,18 +223,15 @@ def call_openai_api(prompt, document_name=None, document_content=None, use_chrom
                                  for m in metadata_list)
                     metadata_info['sources'] = list(sources)
         
-        # Fallback: Pokud se nic nenašlo v RAG a je vybraný konkrétní dokument
         if not context_text and document_content:
             context_text = document_content
             metadata_info['fallback'] = 'specific_document'
         
-        # Sestavení finální zprávy s kontextem
         if context_text:
             user_message = f"KONTEXT Z DOKUMENTŮ:\n{context_text}\n\nOTÁZKA:\n{prompt}"
         else:
             user_message = prompt
 
-        # Volání OpenAI-compatible API
         headers = {
             "Authorization": f"Bearer {OPENAI_API_KEY}",
             "Content-Type": "application/json"
@@ -286,8 +268,6 @@ def call_openai_api(prompt, document_name=None, document_content=None, use_chrom
     except Exception as e:
         return f"❌ Chyba: {str(e)[:200]}"
 
-
-# ===== ROUTES =====
 
 @app.route('/')
 def index():
@@ -364,11 +344,9 @@ def send_chat():
         if not message:
             return jsonify({"error": "Prázdná zpráva"}), 400
 
-        # Omezení délky
         user = user[:50]
         message = message[:500]
 
-        # Vytvoř záznam
         msg_obj = {
             "user": user,
             "message": message,
@@ -377,7 +355,6 @@ def send_chat():
 
         chat_messages.append(msg_obj)
 
-        # Drž jen posledních 500 zpráv (aby se nejedlo RAM)
         if len(chat_messages) > 500:
             chat_messages.pop(0)
 
@@ -430,14 +407,12 @@ def ai_endpoint():
         if not prompt:
             return jsonify({"error": "Chybí prompt"}), 400
 
-        # Pokud je vybraný dokument, přečti ho
         document_content = None
         if document_name:
             document_content = read_document(document_name)
             if document_content is None:
                 return jsonify({"error": f"Dokument '{document_name}' nenalezen"}), 404
 
-        # Zavolej AI
         response = call_openai_api(
             prompt,
             document_name=document_name,
@@ -454,7 +429,6 @@ def ai_endpoint():
         return jsonify({"error": str(e)}), 500
 
 
-# ===== RUN =====
 if __name__ == '__main__':
     print(f"\n{'='*60}")
     print(f"🚀 RAG Aplikace - Školní Interní Portál")
@@ -465,8 +439,7 @@ if __name__ == '__main__':
     print(f"🗃️  ChromaDB: {CHROMA_HOST}:{CHROMA_PORT}")
     print(f"{'='*60}\n")
     
-    # Inicializuj ChromaDB s dokumenty
     init_chroma()
     
-    # Spusť Flask aplikaci
+  
     app.run(host='0.0.0.0', port=PORT, debug=False)
